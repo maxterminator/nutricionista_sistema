@@ -9,7 +9,7 @@ import {
   Loader2
 } from 'lucide-react';
 import { startOfWeek, endOfWeek, subDays, isBefore, parseISO } from 'date-fns';
-import { Link } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 
 interface Patient {
   id: string;

@@ -6,10 +6,8 @@ import {
   ChevronLeft, 
   User, 
   Calendar, 
-  Target, 
   Plus, 
   Activity, 
-  Clock, 
   FileText, 
   Save, 
   Check, 
@@ -22,15 +20,14 @@ import {
   Coffee,
   Sun,
   Utensils,
-  Moon,
-  Trash2
+  Moon
 } from 'lucide-react';
 import { format, parseISO, differenceInYears } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { z } from 'zod';
 
 // Schema para validação dos dados do plano
-const RefeicaoSchema = z.array(z.string().min(1)).length(5);
+const RefeicaoSchema = z.array(z.string()).length(5);
 const MealPlanSchema = z.object({
   plano_semanal: z.array(
     z.object({
@@ -46,15 +43,13 @@ const MealPlanSchema = z.object({
   ).length(7)
 });
 import {
-  LineChart,
-  Line,
+  AreaChart,
+  Area,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
-  ResponsiveContainer,
-  AreaChart,
-  Area
+  ResponsiveContainer
 } from 'recharts';
 
 const PatientProfile: React.FC = () => {
@@ -74,10 +69,10 @@ const PatientProfile: React.FC = () => {
   const [showModal, setShowModal] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
   
-  // AI Plan state
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [generatedPlan, setGeneratedPlan] = useState<any>(null);
-  const [viewingPlan, setViewingPlan] = useState<any>(null);
+  // Manual Plan state
+  const [currentPlan, setCurrentPlan] = useState<any>(null);
+  const [currentPlanId, setCurrentPlanId] = useState<string | null>(null);
+  const [activeDayIndex, setActiveDayIndex] = useState(0);
 
   // Form states
   const [editPatient, setEditPatient] = useState<any>(null);
@@ -172,51 +167,50 @@ const PatientProfile: React.FC = () => {
     }
   };
 
-  const handleGeneratePlan = async () => {
-    setIsGenerating(true);
-    setMessage(null);
-    setViewingPlan(null);
-    try {
-      const { data, error } = await supabase.functions.invoke('gerar-plano', {
-        body: { paciente: patient }
-      });
-
-      if (error) throw error;
-      setGeneratedPlan(data.plano_semanal);
-    } catch (err: any) {
-      console.error('Error generating plan:', err);
-      let errorMessage = err.message;
-      
-      // Se for um erro da Edge Function, tentamos ler a mensagem do corpo da resposta
-      if (err.context && typeof err.context.json === 'function') {
-        try {
-          const body = await err.context.json();
-          errorMessage = body.error || errorMessage;
-        } catch (e) {
-          // Ignora se não conseguir parsear o JSON
-        }
+  const handleNewPlan = () => {
+    const emptyPlanTemplate = [
+      'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado', 'Domingo'
+    ].map(dia => ({
+      dia,
+      refeicoes: {
+        cafe_da_manha: ["", "", "", "", ""],
+        lanche_manha: ["", "", "", "", ""],
+        almoco: ["", "", "", "", ""],
+        lanche_tarde: ["", "", "", "", ""],
+        jantar: ["", "", "", "", ""]
       }
-      
-      setMessage({ type: 'error', text: 'Erro ao gerar plano alimentar: ' + errorMessage });
-    } finally {
-      setIsGenerating(false);
-    }
+    }));
+    setCurrentPlan(emptyPlanTemplate);
+    setCurrentPlanId(null);
+    setActiveDayIndex(0);
+    setMessage(null);
   };
 
   const handleSavePlan = async () => {
     setSaveLoading(true);
     try {
-      const { error } = await supabase.from('planos_alimentares').insert([
-        {
-          paciente_id: id,
-          conteudo: { plano_semanal: generatedPlan }
-        }
-      ]);
+      if (currentPlanId) {
+        const { error } = await supabase
+          .from('planos_alimentares')
+          .update({ conteudo: { plano_semanal: currentPlan } })
+          .eq('id', currentPlanId);
+        
+        if (error) throw error;
+        setMessage({ type: 'success', text: 'Plano alimentar atualizado com sucesso!' });
+      } else {
+        const { error } = await supabase.from('planos_alimentares').insert([
+          {
+            paciente_id: id,
+            conteudo: { plano_semanal: currentPlan }
+          }
+        ]);
 
-      if (error) throw error;
+        if (error) throw error;
+        setMessage({ type: 'success', text: 'Plano alimentar salvo com sucesso!' });
+      }
       
-      setMessage({ type: 'success', text: 'Plano alimentar salvo com sucesso!' });
-      setGeneratedPlan(null);
+      setCurrentPlan(null);
+      setCurrentPlanId(null);
       fetchData();
     } catch (err: any) {
       setMessage({ type: 'error', text: 'Erro ao salvar plano: ' + err.message });
@@ -226,22 +220,23 @@ const PatientProfile: React.FC = () => {
   };
 
   const handleEditMeal = (dayIndex: number, mealKey: string, optionIndex: number, value: string) => {
-    const newPlan = [...generatedPlan];
+    const newPlan = [...currentPlan];
     newPlan[dayIndex].refeicoes[mealKey][optionIndex] = value;
-    setGeneratedPlan(newPlan);
+    setCurrentPlan(newPlan);
   };
 
-  const handleViewPlan = (plan: any) => {
+  const handleEditHistoricalPlan = (plan: any) => {
     // Validar os dados antes de exibir
     const validation = MealPlanSchema.safeParse(plan.conteudo);
     if (validation.success) {
-      setViewingPlan(validation.data.plano_semanal);
-      setGeneratedPlan(null);
+      setCurrentPlan(validation.data.plano_semanal);
+      setCurrentPlanId(plan.id);
+      setActiveDayIndex(0);
       // Rolar para cima para ver o plano
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } else {
       console.error('Plano histórico inválido:', validation.error);
-      alert('Este plano histórico possui um formato inválido e não pode ser exibido.');
+      alert('Este plano histórico possui um formato inválido e não pode ser editado.');
     }
   };
 
@@ -542,55 +537,54 @@ const PatientProfile: React.FC = () => {
         {/* Section 3: Planos Alimentares */}
         {mainTab === 'planos' && (
           <div className="animate-fadeIn">
-            {!generatedPlan && !viewingPlan ? (
+            {!currentPlan ? (
               <div className="form-section" style={{ marginBottom: '2rem', textAlign: 'center', padding: '3rem' }}>
-                {isGenerating ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
-                    <Loader2 className="animate-spin" size={48} color="var(--primary)" />
-                    <h2>Gerando Plano Alimentar...</h2>
-                    <p style={{ color: 'var(--text-muted)' }}>Isso pode levar alguns segundos enquanto a IA analisa os dados.</p>
-                  </div>
-                ) : (
-                  <>
-                    <Sparkles size={48} color="var(--primary)" style={{ marginBottom: '1rem' }} />
-                    <h2>Planos Alimentares com IA</h2>
-                    <p style={{ color: 'var(--text-muted)', marginBottom: '2rem' }}>Gere planos personalizados baseados nos dados, restrições e objetivos do paciente.</p>
-                    <button className="btn btn-primary" style={{ width: 'auto' }} onClick={handleGeneratePlan}>
-                      <Plus size={18} style={{ marginRight: '0.5rem' }} />
-                      Gerar Novo Plano
-                    </button>
-                  </>
-                )}
+                <FileText size={48} color="var(--primary)" style={{ marginBottom: '1rem' }} />
+                <h2>Planos Alimentares</h2>
+                <p style={{ color: 'var(--text-muted)', marginBottom: '2rem' }}>Crie planos personalizados baseados nos dados, restrições e objetivos do paciente.</p>
+                <button className="btn btn-primary" style={{ width: 'auto' }} onClick={handleNewPlan}>
+                  <Plus size={18} style={{ marginRight: '0.5rem' }} />
+                  Novo Plano Alimentar
+                </button>
               </div>
             ) : (
               <div className="animate-fadeIn">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
                     <button 
-                      onClick={() => { setGeneratedPlan(null); setViewingPlan(null); }} 
+                      onClick={() => { setCurrentPlan(null); setCurrentPlanId(null); }} 
                       className="btn" 
                       style={{ width: 'auto', padding: '0.5rem', background: 'none', color: 'var(--text-muted)' }}
                     >
                       <ChevronLeft size={18} />
                     </button>
-                    <h2 style={{ margin: 0 }}>{viewingPlan ? 'Visualizando Plano Salvo' : 'Novo Plano Gerado'}</h2>
+                    <h2 style={{ margin: 0 }}>{currentPlanId ? 'Editando Plano Salvo' : 'Novo Plano Alimentar'}</h2>
                   </div>
                   
-                  {!viewingPlan && (
-                    <button className="btn btn-primary" style={{ width: 'auto' }} onClick={handleSavePlan} disabled={saveLoading}>
-                      {saveLoading ? <Loader2 className="animate-spin" size={18} /> : (
-                        <><Save size={18} style={{ marginRight: '0.5rem' }} /> Salvar Plano</>
-                      )}
+                  <button className="btn btn-primary" style={{ width: 'auto' }} onClick={handleSavePlan} disabled={saveLoading}>
+                    {saveLoading ? <Loader2 className="animate-spin" size={18} /> : (
+                      <><Save size={18} style={{ marginRight: '0.5rem' }} /> Salvar Plano</>
+                    )}
+                  </button>
+                </div>
+
+                <div className="tabs-nav" style={{ fontSize: '0.875rem', marginBottom: '1.5rem', overflowX: 'auto', whiteSpace: 'nowrap' }}>
+                  {currentPlan.map((day: any, idx: number) => (
+                    <button 
+                      key={day.dia}
+                      className={`tab-btn ${activeDayIndex === idx ? 'active' : ''}`} 
+                      onClick={() => setActiveDayIndex(idx)}
+                    >
+                      {day.dia}
                     </button>
-                  )}
+                  ))}
                 </div>
 
                 <div className="meal-plan-grid">
-                  {(generatedPlan || viewingPlan).map((day: any, dayIdx: number) => (
-                    <div key={day.dia} className="day-card">
-                      <div className="day-header">{day.dia}</div>
+                  {currentPlan[activeDayIndex] && (
+                    <div className="day-card" style={{ border: 'none', background: 'transparent', padding: 0 }}>
                       <div className="day-content">
-                        {Object.entries(day.refeicoes).map(([mealKey, options]: [string, any]) => {
+                        {Object.entries(currentPlan[activeDayIndex].refeicoes).map(([mealKey, options]: [string, any]) => {
                           const mealIcons: Record<string, any> = {
                             cafe_da_manha: <Coffee size={16} />,
                             lanche_manha: <Sun size={16} />,
@@ -613,14 +607,14 @@ const PatientProfile: React.FC = () => {
                                 <span>{mealLabels[mealKey]}</span>
                               </div>
                               <div className="meal-options">
-                                {options.map((option: string, optIdx: number) => (
+                                {(options as string[]).map((option: string, optIdx: number) => (
                                   <div key={optIdx} className="meal-option-item">
                                     <input 
                                       type="text" 
                                       className="meal-input"
                                       value={option}
-                                      disabled={!!viewingPlan}
-                                      onChange={(e) => handleEditMeal(dayIdx, mealKey, optIdx, e.target.value)}
+                                      placeholder={`Opção ${optIdx + 1}`}
+                                      onChange={(e) => handleEditMeal(activeDayIndex, mealKey, optIdx, e.target.value)}
                                     />
                                   </div>
                                 ))}
@@ -630,7 +624,7 @@ const PatientProfile: React.FC = () => {
                         })}
                       </div>
                     </div>
-                  ))}
+                  )}
                 </div>
               </div>
             )}
@@ -639,7 +633,7 @@ const PatientProfile: React.FC = () => {
             {mealPlans.length > 0 ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 {mealPlans.map((p) => (
-                  <div key={p.id} className="consultation-card" style={{ cursor: 'pointer' }} onClick={() => handleViewPlan(p)}>
+                  <div key={p.id} className="consultation-card" style={{ cursor: 'pointer' }} onClick={() => handleEditHistoricalPlan(p)}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
                         <div style={{ padding: '0.5rem', background: 'var(--primary-light)', borderRadius: '0.5rem', color: 'var(--primary)' }}>
@@ -647,7 +641,7 @@ const PatientProfile: React.FC = () => {
                         </div>
                         <div>
                           <div style={{ fontWeight: 600 }}>Plano Alimentar - {format(parseISO(p.created_at), 'dd/MM/yyyy')}</div>
-                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Gerado às {format(parseISO(p.created_at), 'HH:mm')}</div>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Criado às {format(parseISO(p.created_at), 'HH:mm')}</div>
                         </div>
                       </div>
                       <ChevronLeft size={18} style={{ transform: 'rotate(180deg)', color: 'var(--text-muted)' }} />
@@ -656,7 +650,7 @@ const PatientProfile: React.FC = () => {
                 ))}
               </div>
             ) : (
-              <div className="empty-message">Nenhum plano alimentar gerado ainda.</div>
+              <div className="empty-message">Nenhum plano alimentar criado ainda.</div>
             )}
           </div>
         )}

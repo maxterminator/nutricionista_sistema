@@ -6,7 +6,6 @@ import {
   Search, 
   User, 
   ChevronRight,
-  Filter,
   Loader2
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
