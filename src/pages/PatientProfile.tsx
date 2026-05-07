@@ -16,7 +16,6 @@ import {
   X,
   History,
   TrendingUp,
-  Sparkles,
   Coffee,
   Sun,
   Utensils,
